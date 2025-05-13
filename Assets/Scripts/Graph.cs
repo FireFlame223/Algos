@@ -28,4 +28,13 @@ public class Graph<T>
         adjacencyList[fromNode].Add(toNode);
         adjacencyList[toNode].Add(fromNode);
     }
+
+    public void PrintGraph()
+    {
+        foreach (var node in adjacencyList)
+        {
+            string neighbors = string.Join(", ", node.Value);
+            Debug.Log($"Node: {node.Key}, Neighbors: {neighbors}");
+        }
+    }
 }
