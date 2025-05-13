@@ -1,71 +1,41 @@
 using UnityEngine;
+using System.Collections.Generic;
+using System.Collections;
 
 public class DungeonGenerator : MonoBehaviour
 {
-    public int minRoomSize = 25;
+    public int minRoomSize = 10;
+    public int maxRoomSize = 30;
     public int maxRooms = 4;
+    public int minRooms = 1;
 
-    private RectInt room1, room2, room3, room4;
+    private List<RectInt> rooms = new List<RectInt>();
 
     void Start()
     {
-        GenerateRooms();
+        StartCoroutine(GenerateRoomsCoroutine());
     }
 
-    void GenerateRooms()
+    IEnumerator GenerateRoomsCoroutine()
     {
-        int numberOfRooms = Random.Range(1, maxRooms + 1);
-        RectInt[] rooms = new RectInt[numberOfRooms];
+        int numberOfRooms = Random.Range(minRooms, maxRooms + 1);
+        rooms.Clear();
 
         for (int i = 0; i < numberOfRooms; i++)
         {
-            int width = Random.Range(minRoomSize, 100);
-            int height = Random.Range(minRoomSize, 50);
-            rooms[i] = new RectInt(0, 0, width, height);
+            int width = Random.Range(minRoomSize, maxRoomSize);
+            int height = Random.Range(minRoomSize, maxRoomSize);
+            rooms.Add(new RectInt(0, 0, width, height));
+            yield return new WaitForSeconds(0.1f);
         }
-
-        if (numberOfRooms > 0)
-        {
-            room1 = rooms[0];
-        }
-        else
-        {
-            room1 = new RectInt(0, 0, 0, 0);
-        }
-
-        if (numberOfRooms > 1)
-        {
-            room2 = rooms[1];
-        }
-        else
-        {
-            room2 = new RectInt(0, 0, 0, 0);
-        }
-
-        if (numberOfRooms > 2)
-        {
-            room3 = rooms[2];
-        }
-        else
-        {
-            room3 = new RectInt(0, 0, 0, 0);
-        }
-
-        if (numberOfRooms > 3)
-        {
-            room4 = rooms[3];
-        }
-        else
-        {
-            room4 = new RectInt(0, 0, 0, 0);
-        }
+        Debug.Log($"Rooms generated: {rooms.Count}");
     }
 
     void Update()
     {
-        AlgorithmsUtils.DebugRectInt(room1, Color.green);
-        AlgorithmsUtils.DebugRectInt(room2, Color.blue);
-        AlgorithmsUtils.DebugRectInt(room3, Color.yellow);
-        AlgorithmsUtils.DebugRectInt(room4, Color.red);
+        foreach (var room in rooms)
+        {
+            AlgorithmsUtils.DebugRectInt(room, new Color(255, 0, 0));
+        }
     }
 }
