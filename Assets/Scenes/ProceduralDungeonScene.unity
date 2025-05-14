@@ -375,6 +375,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   mainRoomSize: 30
   splitDeviation: 0.2
+  doorWidth: 2
 --- !u!4 &347587371
 Transform:
   m_ObjectHideFlags: 0

@@ -6,25 +6,29 @@ public class DungeonGenerator : MonoBehaviour
 {
     public int mainRoomSize = 30; // Size of the initial large room
     public float splitDeviation = 0.2f; // How much the split point can deviate from the middle (0.5 = 50% deviation)
+    public int doorWidth = 2; // Width of doors between rooms
 
-    private List<RectInt> rooms = new List<RectInt>(); // List to store all generated rooms
-    private int maxSplits = 4; // Maximum number of times we'll split rooms
+    private int splitsNumber = 4; // Maximum number of times we'll split rooms
+
+    private List<RectInt> rooms = new List<RectInt>(); // Store generated rooms
+    private List<Vector2Int> doors = new List<Vector2Int>(); // Store door positions
+    private List<DoorInfo> doorInfos = new List<DoorInfo>(); // Store door orientation information
 
     void Start()
     {
-        // Start the room generation process
-        StartCoroutine(GenerateRoomsCoroutine());
+        StartCoroutine(GenerateRooms());
     }
 
-    IEnumerator GenerateRoomsCoroutine()
+    IEnumerator GenerateRooms()
     {
-        // To ensure safity, clear any existing rooms and create the initial large room
+        // To ensure safity, clear any existing rooms and doors and create the initial large room
         rooms.Clear();
+        doors.Clear();
         RectInt initialRoom = new RectInt(0, 0, mainRoomSize, mainRoomSize);
         rooms.Add(initialRoom);
 
         // Perform the specified number of splits
-        for (int i = 0; i < maxSplits; i++)
+        for (int i = 0; i < splitsNumber; i++)
         {
             // Create a new list to store rooms after current split
             List<RectInt> newRooms = new List<RectInt>();
@@ -35,13 +39,12 @@ public class DungeonGenerator : MonoBehaviour
                 // Randomly decide whether to split vertically or horizontally
                 bool splitVertically = Random.value > 0.5f;
                 
-                // Check if room is too small for the chosen split direction
-                // If width < 4, switch to horizontal split
+                // Check if room is too small for the chosen split direction.
+                // If so, switch the split direction.
                 if (splitVertically && room.width < 4)
                 {
                     splitVertically = false;
                 }
-                // If height < 4, switch to vertical split
                 else if (!splitVertically && room.height < 4)
                 {
                     splitVertically = true;
@@ -98,20 +101,138 @@ public class DungeonGenerator : MonoBehaviour
             }
             // Update the rooms list with the new split rooms
             rooms = newRooms;
-            // Wait before next split
             yield return new WaitForSeconds(1f);
         }
 
-        // Log the total number of rooms generated
-        Debug.Log($"Rooms generated: {rooms.Count}");
+        yield return StartCoroutine(PlaceDoors());
     }
 
+    // Helper class to store door information
+    private class DoorInfo
+    {
+        public Vector2Int position; // Position of the door
+        public bool isVertical; // Whether the door is vertical
+        // Indices of the rooms that the door connects
+        public int room1Index;
+        public int room2Index;
+    }
+
+    IEnumerator PlaceDoors()
+    {
+        yield return new WaitForSeconds(0.5f);
+        
+        // Clear existing doors
+        doors.Clear();
+        doorInfos.Clear();
+        
+        // Find and place doors between adjacent rooms
+        for (int i = 0; i < rooms.Count; i++)
+        {
+            for (int j = i + 1; j < rooms.Count; j++)
+            {
+                RectInt room1 = rooms[i];
+                RectInt room2 = rooms[j];
+
+                // Check if rooms share a vertical wall
+                if ((room1.xMax == room2.xMin || room1.xMin == room2.xMax) && 
+                    !(room1.yMax <= room2.yMin || room1.yMin >= room2.yMax))
+                {
+                    // Find overlap area
+                    int yStart = Mathf.Max(room1.yMin, room2.yMin);
+                    int yEnd = Mathf.Min(room1.yMax, room2.yMax);
+                    
+                    // Make sure overlap is big enough for a door
+                    if (yEnd - yStart > 2)
+                    {
+                        // Place door somewhere in the middle of the overlap, avoiding corners
+                        int doorY = Random.Range(yStart + 1, yEnd - 1);
+                        int doorX = room1.xMax == room2.xMin ? room1.xMax : room1.xMin;
+                        
+                        DoorInfo newDoor = new DoorInfo { 
+                            position = new Vector2Int(doorX, doorY),
+                            isVertical = true,
+                            room1Index = i,
+                            room2Index = j
+                        };
+                        
+                        doors.Add(newDoor.position);
+                        doorInfos.Add(newDoor);
+                        yield return new WaitForSeconds(0.3f);
+                    }
+                }
+                // Check if rooms share a horizontal wall
+                else if ((room1.yMax == room2.yMin || room1.yMin == room2.yMax) && 
+                         !(room1.xMax <= room2.xMin || room1.xMin >= room2.xMax))
+                {
+                    // Find overlap area
+                    int xStart = Mathf.Max(room1.xMin, room2.xMin);
+                    int xEnd = Mathf.Min(room1.xMax, room2.xMax);
+                    
+                    // Make sure overlap is big enough for a door
+                    if (xEnd - xStart > 2)
+                    {
+                        // Place door somewhere in the middle of the overlap, avoiding corners
+                        int doorX = Random.Range(xStart + 1, xEnd - 1);
+                        int doorY = room1.yMax == room2.yMin ? room1.yMax : room1.yMin;
+                        
+                        DoorInfo newDoor = new DoorInfo { 
+                            position = new Vector2Int(doorX, doorY),
+                            isVertical = false,
+                            room1Index = i,
+                            room2Index = j
+                        };
+                        
+                        doors.Add(newDoor.position);
+                        doorInfos.Add(newDoor);
+                        yield return new WaitForSeconds(0.3f);
+                    }
+                }
+            }
+        }
+    }
+    
     void Update()
     {
-        // Draw each room in red
+        // Draw each room
         foreach (var room in rooms)
         {
             AlgorithmsUtils.DebugRectInt(room, new Color(255, 0, 0));
+        }
+        
+        // Draw each door
+        foreach (var door in doors)
+        {
+            // Get each door's data from the list
+            DoorInfo doorInfo = null;
+            for (int i = 0; i < doorInfos.Count; i++) 
+            {
+                if (doorInfos[i].position == door) 
+                {
+                    doorInfo = doorInfos[i];
+                    break;
+                }
+            }
+            
+            // Draw vertical doors
+            if (doorInfo != null && doorInfo.isVertical)
+            {
+                Debug.DrawLine(
+                    new Vector3(door.x, 0, door.y - doorWidth/2),
+                    new Vector3(door.x, 0, door.y + doorWidth/2),
+                    Color.blue,
+                    0.1f
+                );
+            }
+            // Draw horizontal doors
+            else
+            {
+                Debug.DrawLine(
+                    new Vector3(door.x - doorWidth/2, 0, door.y),
+                    new Vector3(door.x + doorWidth/2, 0, door.y),
+                    Color.blue,
+                    0.1f
+                );
+            }
         }
     }
 }
