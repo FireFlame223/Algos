@@ -7,19 +7,23 @@ public class DungeonGenerator : MonoBehaviour
     public int mainRoomSize = 30; // Size of the initial large room
     public float splitDeviation = 0.2f; // How much the split point can deviate from the middle (0.5 = 50% deviation)
     public int doorWidth = 2; // Width of doors between rooms
+    public float graphGenerationDelay = 0.5f; // Delay between graph generation steps for visualization
+
+    public GraphVisualizer graphVisualizer; // Reference to the graph visualizer component
 
     private int splitsNumber = 4; // Maximum number of times we'll split rooms
-
     private List<RectInt> rooms = new List<RectInt>(); // Store generated rooms
     private List<Vector2Int> doors = new List<Vector2Int>(); // Store door positions
     private List<DoorInfo> doorInfos = new List<DoorInfo>(); // Store door orientation information
+    private Graph dungeonGraph; // The graph representing the dungeon structure
 
     void Start()
     {
+        dungeonGraph = new Graph();
         StartCoroutine(GenerateRooms());
     }
 
-    IEnumerator GenerateRooms()
+    public IEnumerator GenerateRooms()
     {
         // To ensure safity, clear any existing rooms and doors and create the initial large room
         rooms.Clear();
@@ -121,11 +125,29 @@ public class DungeonGenerator : MonoBehaviour
     {
         yield return new WaitForSeconds(0.5f);
         
-        // Clear existing doors
+        // Clear existing data structures
         doors.Clear();
         doorInfos.Clear();
+        dungeonGraph = new Graph();
         
-        // Find and place doors between adjacent rooms
+        //Create nodes for each room
+        for (int i = 0; i < rooms.Count; i++)
+        {
+            Vector2 roomCenter = new Vector2(
+                rooms[i].x + rooms[i].width / 2f,
+                rooms[i].y + rooms[i].height / 2f
+            );
+            dungeonGraph.AddNode(i, roomCenter);
+            
+            // Update visualizer after each room node
+            if (graphVisualizer != null)
+            {
+                graphVisualizer.SetGraph(dungeonGraph);
+            }
+            yield return new WaitForSeconds(graphGenerationDelay);
+        }
+        
+        // Create doors and nodes for the dungeon and connect them to rooms and room noeds
         for (int i = 0; i < rooms.Count; i++)
         {
             for (int j = i + 1; j < rooms.Count; j++)
@@ -133,7 +155,7 @@ public class DungeonGenerator : MonoBehaviour
                 RectInt room1 = rooms[i];
                 RectInt room2 = rooms[j];
 
-                // Check if rooms share a vertical wall
+                // Check for vertical wall sharing
                 if ((room1.xMax == room2.xMin || room1.xMin == room2.xMax) && 
                     !(room1.yMax <= room2.yMin || room1.yMin >= room2.yMax))
                 {
@@ -148,6 +170,30 @@ public class DungeonGenerator : MonoBehaviour
                         int doorY = Random.Range(yStart + 1, yEnd - 1);
                         int doorX = room1.xMax == room2.xMin ? room1.xMax : room1.xMin;
                         
+                        // Create door node
+                        int doorNodeId = rooms.Count + doors.Count;
+                        Vector2 doorPosition = new Vector2(doorX, doorY);
+                        dungeonGraph.AddNode(doorNodeId, doorPosition);
+                        
+                        // Update visualizer after adding door node
+                        if (graphVisualizer != null)
+                        {
+                            graphVisualizer.SetGraph(dungeonGraph);
+                        }
+                        yield return new WaitForSeconds(graphGenerationDelay);
+                        
+                        // Connect door to both rooms
+                        dungeonGraph.AddEdge(i, doorNodeId);
+                        dungeonGraph.AddEdge(j, doorNodeId);
+                        
+                        // Update visualizer after adding connections
+                        if (graphVisualizer != null)
+                        {
+                            graphVisualizer.SetGraph(dungeonGraph);
+                        }
+                        yield return new WaitForSeconds(graphGenerationDelay);
+                        
+                        // Store door information
                         DoorInfo newDoor = new DoorInfo { 
                             position = new Vector2Int(doorX, doorY),
                             isVertical = true,
@@ -157,10 +203,9 @@ public class DungeonGenerator : MonoBehaviour
                         
                         doors.Add(newDoor.position);
                         doorInfos.Add(newDoor);
-                        yield return new WaitForSeconds(0.3f);
                     }
                 }
-                // Check if rooms share a horizontal wall
+                // Check for horizontal wall sharing
                 else if ((room1.yMax == room2.yMin || room1.yMin == room2.yMax) && 
                          !(room1.xMax <= room2.xMin || room1.xMin >= room2.xMax))
                 {
@@ -175,6 +220,30 @@ public class DungeonGenerator : MonoBehaviour
                         int doorX = Random.Range(xStart + 1, xEnd - 1);
                         int doorY = room1.yMax == room2.yMin ? room1.yMax : room1.yMin;
                         
+                        // Create door node
+                        int doorNodeId = rooms.Count + doors.Count;
+                        Vector2 doorPosition = new Vector2(doorX, doorY);
+                        dungeonGraph.AddNode(doorNodeId, doorPosition);
+                        
+                        // Update visualizer after adding door node
+                        if (graphVisualizer != null)
+                        {
+                            graphVisualizer.SetGraph(dungeonGraph);
+                        }
+                        yield return new WaitForSeconds(graphGenerationDelay);
+                        
+                        // Connect door to both rooms
+                        dungeonGraph.AddEdge(i, doorNodeId);
+                        dungeonGraph.AddEdge(j, doorNodeId);
+                        
+                        // Update visualizer after adding connections
+                        if (graphVisualizer != null)
+                        {
+                            graphVisualizer.SetGraph(dungeonGraph);
+                        }
+                        yield return new WaitForSeconds(graphGenerationDelay);
+                        
+                        // Store door information
                         DoorInfo newDoor = new DoorInfo { 
                             position = new Vector2Int(doorX, doorY),
                             isVertical = false,
@@ -184,7 +253,6 @@ public class DungeonGenerator : MonoBehaviour
                         
                         doors.Add(newDoor.position);
                         doorInfos.Add(newDoor);
-                        yield return new WaitForSeconds(0.3f);
                     }
                 }
             }
