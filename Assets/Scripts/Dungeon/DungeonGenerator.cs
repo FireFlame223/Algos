@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System.Collections;
+using Unity.AI.Navigation;
 
 public class DungeonGenerator : MonoBehaviour
 {
@@ -11,16 +12,20 @@ public class DungeonGenerator : MonoBehaviour
 
     public GraphVisualizer graphVisualizer; // Reference to the graph visualizer component
 
+    [SerializeField] private NavMeshSurface navMeshSurface;
     private int splitsNumber = 4; // Maximum number of times we'll split rooms
     private List<RectInt> rooms = new List<RectInt>(); // Store generated rooms
     private List<Vector2Int> doors = new List<Vector2Int>(); // Store door positions
     private List<DoorInfo> doorInfos = new List<DoorInfo>(); // Store door orientation information
     private Graph dungeonGraph; // The graph representing the dungeon structure
 
+    [SerializeField] private GameObject wallPrefab; // Prefab for the wall segments
+
     void Start()
     {
         dungeonGraph = new Graph();
         StartCoroutine(GenerateRooms());
+        BakeNavMesh();
     }
 
     public IEnumerator GenerateRooms()
@@ -257,6 +262,9 @@ public class DungeonGenerator : MonoBehaviour
                 }
             }
         }
+
+        // Spawn the physical dungeon assets after all rooms and doors are generated
+        SpawnDungeonAssets();
     }
     
     void Update()
@@ -301,6 +309,99 @@ public class DungeonGenerator : MonoBehaviour
                     0.1f
                 );
             }
+        }
+    }
+
+    private void BakeNavMesh()
+    {
+        if (navMeshSurface != null)
+        {
+            navMeshSurface.BuildNavMesh();
+        }
+    }
+
+    private void SpawnDungeonAssets()
+    {
+        // Create parent object at scene root level
+        GameObject wallsParent = new GameObject("Walls");
+        wallsParent.transform.SetParent(null); // Set to null to make it a root object
+
+        // Get wall prefab dimensions
+        float wallWidth = 0.5f;  // Wall prefab is 0.5 units wide
+        float wallYOffset = 0.5f; // Raise walls by 0.5 units
+
+        // Spawn walls for each room
+        foreach (var room in rooms)
+        {
+            // Calculate room boundaries
+            float left = room.x;
+            float right = room.x + room.width;
+            float bottom = room.y;
+            float top = room.y + room.height;
+
+            // Spawn walls for each side of the room
+            // Top wall
+            for (float x = left; x < right; x += wallWidth)
+            {
+                SpawnWall(new Vector3(x, wallYOffset, top), wallsParent.transform);
+            }
+
+            // Bottom wall
+            for (float x = left; x < right; x += wallWidth)
+            {
+                SpawnWall(new Vector3(x, wallYOffset, bottom), wallsParent.transform);
+            }
+
+            // Left wall
+            for (float z = bottom; z < top; z += wallWidth)
+            {
+                SpawnWall(new Vector3(left, wallYOffset, z), wallsParent.transform);
+            }
+
+            // Right wall
+            for (float z = bottom; z < top; z += wallWidth)
+            {
+                SpawnWall(new Vector3(right, wallYOffset, z), wallsParent.transform);
+            }
+        }
+
+        // Rebuild the nav mesh after spawning all assets
+        BakeNavMesh();
+    }
+
+    private void SpawnWall(Vector3 position, Transform parent)
+    {
+        // Check if this position overlaps with any door
+        bool isDoorPosition = false;
+        foreach (var doorInfo in doorInfos)
+        {
+            if (doorInfo.isVertical)
+            {
+                // For vertical doors, check if we're within the door width on the correct wall
+                if (Mathf.Abs(position.x - doorInfo.position.x) < 0.1f &&
+                    Mathf.Abs(position.z - doorInfo.position.y) < doorWidth / 2f)
+                {
+                    isDoorPosition = true;
+                    break;
+                }
+            }
+            else
+            {
+                // For horizontal doors, check if we're within the door width on the correct wall
+                if (Mathf.Abs(position.z - doorInfo.position.y) < 0.1f &&
+                    Mathf.Abs(position.x - doorInfo.position.x) < doorWidth / 2f)
+                {
+                    isDoorPosition = true;
+                    break;
+                }
+            }
+        }
+
+        // Only spawn wall if this position isn't a door
+        if (!isDoorPosition)
+        {
+            GameObject wall = Instantiate(wallPrefab, position, Quaternion.identity, parent);
+            wall.name = "Wall";
         }
     }
 }
