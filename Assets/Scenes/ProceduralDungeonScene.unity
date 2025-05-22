@@ -207,13 +207,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 1, y: 7, z: 1}
+  m_LocalRotation: {x: 0.5000004, y: -0, z: -0, w: 0.86602515}
+  m_LocalPosition: {x: 1, y: 8.000004, z: -2.4641035}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 60, y: 0, z: 0}
 --- !u!114 &330585547
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -336,7 +336,7 @@ MonoBehaviour:
   graphVisualizer: {fileID: 1456857407}
   navMeshSurface: {fileID: 1977782037}
   wallPrefab: {fileID: 8186914927062543598, guid: 8d780f985f49849479d2d2980d821055, type: 3}
-  doorPrefab: {fileID: 3849371412158430931, guid: 0a448faaf5ef87c4cb669edfa830a0c1, type: 3}
+  floorPrefab: {fileID: 3849371412158430931, guid: 0a448faaf5ef87c4cb669edfa830a0c1, type: 3}
 --- !u!4 &347587371
 Transform:
   m_ObjectHideFlags: 0

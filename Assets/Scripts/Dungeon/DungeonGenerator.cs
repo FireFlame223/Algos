@@ -13,13 +13,13 @@ public class DungeonGenerator : MonoBehaviour
     public GraphVisualizer graphVisualizer; // Reference to the graph visualizer component
 
     [SerializeField] private NavMeshSurface navMeshSurface;
+    [SerializeField] private GameObject wallPrefab; // Prefab for the wall segments
+    [SerializeField] private GameObject floorPrefab; // Prefab for the floor segments
     private int splitsNumber = 4; // Maximum number of times we'll split rooms
     private List<RectInt> rooms = new List<RectInt>(); // Store generated rooms
     private List<Vector2Int> doors = new List<Vector2Int>(); // Store door positions
     private List<DoorInfo> doorInfos = new List<DoorInfo>(); // Store door orientation information
     private Graph dungeonGraph; // The graph representing the dungeon structure
-
-    [SerializeField] private GameObject wallPrefab; // Prefab for the wall segments
 
     void Start()
     {
@@ -322,15 +322,17 @@ public class DungeonGenerator : MonoBehaviour
 
     private void SpawnDungeonAssets()
     {
-        // Create parent object at scene root level
+        // Create parent objects at scene root level
         GameObject wallsParent = new GameObject("Walls");
+        GameObject floorsParent = new GameObject("Floors");
         wallsParent.transform.SetParent(null); // Set to null to make it a root object
+        floorsParent.transform.SetParent(null);
 
         // Get wall prefab dimensions
         float wallWidth = 0.5f;  // Wall prefab is 0.5 units wide
         float wallYOffset = 0.5f; // Raise walls by 0.5 units
 
-        // Spawn walls for each room
+        // Spawn walls and floors for each room
         foreach (var room in rooms)
         {
             // Calculate room boundaries
@@ -338,6 +340,15 @@ public class DungeonGenerator : MonoBehaviour
             float right = room.x + room.width;
             float bottom = room.y;
             float top = room.y + room.height;
+
+            // Spawn floors for the room
+            for (float x = left; x < right; x += 1f)
+            {
+                for (float z = bottom; z < top; z += 1f)
+                {
+                    SpawnFloor(new Vector3(x + 0.5f, 0, z + 0.5f), floorsParent.transform);
+                }
+            }
 
             // Spawn walls for each side of the room
             // Top wall
@@ -403,5 +414,11 @@ public class DungeonGenerator : MonoBehaviour
             GameObject wall = Instantiate(wallPrefab, position, Quaternion.identity, parent);
             wall.name = "Wall";
         }
+    }
+
+    private void SpawnFloor(Vector3 position, Transform parent)
+    {
+        GameObject floor = Instantiate(floorPrefab, position, Quaternion.Euler(90, 0, 0), parent);
+        floor.name = "Floor";
     }
 }
