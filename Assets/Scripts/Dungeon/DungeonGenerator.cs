@@ -9,6 +9,7 @@ public class DungeonGenerator : MonoBehaviour
     public float splitDeviation = 0.2f; // How much the split point can deviate from the middle (0.5 = 50% deviation)
     public int doorWidth = 2; // Width of doors between rooms
     public float graphGenerationDelay = 0.5f; // Delay between graph generation steps for visualization
+    public float floorTileSize = 1f; // Size of each floor tile (1x1 by default)
 
     public GraphVisualizer graphVisualizer; // Reference to the graph visualizer component
 
@@ -335,49 +336,66 @@ public class DungeonGenerator : MonoBehaviour
         // Spawn walls and floors for each room
         foreach (var room in rooms)
         {
-            // Calculate room boundaries
-            float left = room.x;
-            float right = room.x + room.width;
-            float bottom = room.y;
-            float top = room.y + room.height;
-
-            // Spawn floors for the room
-            for (float x = left; x < right; x += 1f)
-            {
-                for (float z = bottom; z < top; z += 1f)
-                {
-                    SpawnFloor(new Vector3(x + 0.5f, 0, z + 0.5f), floorsParent.transform);
-                }
-            }
-
-            // Spawn walls for each side of the room
-            // Top wall
-            for (float x = left; x < right; x += wallWidth)
-            {
-                SpawnWall(new Vector3(x, wallYOffset, top), wallsParent.transform);
-            }
-
-            // Bottom wall
-            for (float x = left; x < right; x += wallWidth)
-            {
-                SpawnWall(new Vector3(x, wallYOffset, bottom), wallsParent.transform);
-            }
-
-            // Left wall
-            for (float z = bottom; z < top; z += wallWidth)
-            {
-                SpawnWall(new Vector3(left, wallYOffset, z), wallsParent.transform);
-            }
-
-            // Right wall
-            for (float z = bottom; z < top; z += wallWidth)
-            {
-                SpawnWall(new Vector3(right, wallYOffset, z), wallsParent.transform);
-            }
+            SpawnRoomFloors(room, floorsParent.transform);
+            SpawnRoomWalls(room, wallsParent.transform, wallWidth, wallYOffset);
         }
 
         // Rebuild the nav mesh after spawning all assets
         BakeNavMesh();
+    }
+
+    private void SpawnRoomFloors(RectInt room, Transform parent)
+    {
+        // Calculate room boundaries
+        float left = room.x;
+        float right = room.x + room.width;
+        float bottom = room.y;
+        float top = room.y + room.height;
+
+        // Spawn floor tiles to fill the room
+        // We offset by half the tile size to center each tile in its grid position
+        float offset = floorTileSize / 2f;
+        for (float x = left; x < right; x += floorTileSize)
+        {
+            for (float z = bottom; z < top; z += floorTileSize)
+            {
+                SpawnFloor(new Vector3(x + offset, 0, z + offset), parent);
+            }
+        }
+    }
+
+    private void SpawnRoomWalls(RectInt room, Transform parent, float wallWidth, float wallYOffset)
+    {
+        // Calculate room boundaries
+        float left = room.x;
+        float right = room.x + room.width;
+        float bottom = room.y;
+        float top = room.y + room.height;
+
+        // Spawn walls for each side of the room
+        // Top wall
+        for (float x = left; x < right; x += wallWidth)
+        {
+            SpawnWall(new Vector3(x, wallYOffset, top), parent);
+        }
+
+        // Bottom wall
+        for (float x = left; x < right; x += wallWidth)
+        {
+            SpawnWall(new Vector3(x, wallYOffset, bottom), parent);
+        }
+
+        // Left wall
+        for (float z = bottom; z < top; z += wallWidth)
+        {
+            SpawnWall(new Vector3(left, wallYOffset, z), parent);
+        }
+
+        // Right wall
+        for (float z = bottom; z < top; z += wallWidth)
+        {
+            SpawnWall(new Vector3(right, wallYOffset, z), parent);
+        }
     }
 
     private void SpawnWall(Vector3 position, Transform parent)
@@ -418,6 +436,8 @@ public class DungeonGenerator : MonoBehaviour
 
     private void SpawnFloor(Vector3 position, Transform parent)
     {
+        // Spawn a floor tile at the given position
+        // Rotate 90 degrees on X axis to lay flat on the ground
         GameObject floor = Instantiate(floorPrefab, position, Quaternion.Euler(90, 0, 0), parent);
         floor.name = "Floor";
     }
