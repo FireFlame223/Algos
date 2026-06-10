@@ -5,85 +5,82 @@ using System.Collections.Generic;
 // Each node has a position in 2D space and can be connected to other nodes.
 public class Graph
 {
-    // Stores the connections between nodes (adjacency list representation)
-    // Key: node ID, Value: list of connected node IDs
-    private Dictionary<int, List<int>> adjacencyList;
-    
-    // Stores the 2D position of each node
-    // Key: node ID, Value: position in 2D space
-    private Dictionary<int, Vector2> nodePositions;
+    private class Node
+    {
+        public Vector2 Position;
+        public List<int> Neighbors = new List<int>();
+    }
 
-    // Creates a new empty graph.
+    // One dictionary holds both position and neighbors for each node.
+    private Dictionary<int, Node> nodes;
+
+    // Creates an empty graph.
     public Graph()
     {
-        adjacencyList = new Dictionary<int, List<int>>();
-        nodePositions = new Dictionary<int, Vector2>();
+        nodes = new Dictionary<int, Node>();
     }
 
     // Adds a new node to the graph with the specified ID and position.
     // If a node with this ID already exists, it will not be modified.
     public void AddNode(int nodeId, Vector2 position)
     {
-        if (!adjacencyList.ContainsKey(nodeId))
+        if (!nodes.ContainsKey(nodeId))
         {
-            adjacencyList[nodeId] = new List<int>();
-            nodePositions[nodeId] = position;
+            nodes[nodeId] = new Node { Position = position };
         }
     }
 
-    // Creates a connection between two nodes.
-    // If either node doesn't exist, it will be created.
+    // Creates a connection between two nodes that already exist.
     // If the connection already exists, nothing changes.
     public void AddEdge(int node1, int node2)
     {
-        // Create nodes if they don't exist
-        if (!adjacencyList.ContainsKey(node1))
-            adjacencyList[node1] = new List<int>();
-        if (!adjacencyList.ContainsKey(node2))
-            adjacencyList[node2] = new List<int>();
+        if (!nodes.ContainsKey(node1) || !nodes.ContainsKey(node2))
+        {
+            return;
+        }
 
-        // Add connection if it doesn't exist
-        if (!adjacencyList[node1].Contains(node2))
-            adjacencyList[node1].Add(node2);
-        if (!adjacencyList[node2].Contains(node1))
-            adjacencyList[node2].Add(node1);
+        if (!nodes[node1].Neighbors.Contains(node2))
+        {
+            nodes[node1].Neighbors.Add(node2);
+        }
+
+        if (!nodes[node2].Neighbors.Contains(node1))
+        {
+            nodes[node2].Neighbors.Add(node1);
+        }
     }
 
-    // Gets the 2D position of a node.
+    // Returns the position of a node, or Vector2.zero if the ID does not exist.
     public Vector2 GetNodePosition(int nodeId)
     {
-        if (nodePositions.ContainsKey(nodeId))
+        if (nodes.ContainsKey(nodeId))
         {
-            return nodePositions[nodeId];
+            return nodes[nodeId].Position;
         }
-        else
-        {
-            return Vector2.zero;
-        }
+
+        return Vector2.zero;
     }
 
-    // Gets all nodes that are connected to the specified node.
+    // Returns a copy so outside code cannot change the graph's internal lists.
     public List<int> GetNeighbors(int nodeId)
     {
-        if (adjacencyList.ContainsKey(nodeId))
+        if (nodes.ContainsKey(nodeId))
         {
-            return adjacencyList[nodeId];
+            return new List<int>(nodes[nodeId].Neighbors);
         }
-        else
-        {
-            return new List<int>();
-        }
+
+        return new List<int>();
     }
 
-    // Gets the total number of nodes in the graph.
+    // Returns how many nodes are in the graph.
     public int GetNodeCount()
     {
-        return adjacencyList.Count;
+        return nodes.Count;
     }
 
-    // Gets all node IDs in the graph.
+    // Returns every node ID in the graph.
     public IEnumerable<int> GetAllNodes()
     {
-        return adjacencyList.Keys;
+        return nodes.Keys;
     }
 }
