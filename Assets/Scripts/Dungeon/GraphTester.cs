@@ -1,5 +1,9 @@
 using UnityEngine;
 
+/// <summary>
+/// Wires the GraphVisualizer to the DungeonGenerator in the scene.
+/// Attach this if the two components are on different GameObjects.
+/// </summary>
 public class GraphTester : MonoBehaviour
 {
     public DungeonGenerator dungeonGenerator;
@@ -17,7 +21,6 @@ public class GraphTester : MonoBehaviour
             graphVisualizer = FindObjectOfType<GraphVisualizer>();
         }
 
-        // Connect the visualizer to the dungeon generator
         if (dungeonGenerator != null && graphVisualizer != null)
         {
             dungeonGenerator.graphVisualizer = graphVisualizer;

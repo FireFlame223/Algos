@@ -3,313 +3,617 @@ using System.Collections.Generic;
 using System.Collections;
 using Unity.AI.Navigation;
 
-// Generates a dungeon by splitting rooms (BSP), building a graph, and spawning floor/wall prefabs.
+/// <summary>
+/// Procedurally generates a dungeon in three phases:
+/// 1. BSP - split one big rectangle into smaller rooms until they cannot split anymore.
+/// 2. Graph - rooms and doors become nodes; connections become edges. BFS/DFS verify connectivity.
+/// 3. Spawn - one floor for the whole area, walls around each room (no duplicates), then bake NavMesh.
+/// </summary>
 public class DungeonGenerator : MonoBehaviour
 {
-    private const int MinRoomSizeToSplit = 4;
-    private const int MinChildRoomSize = 2;
-    private const int MinDoorOverlap = 2;
-    private const float BspStepDelay = 1f;
+    // --- Constants ---
 
-    private enum SplitAxis
+    // Shared wall must be at least this long before we allow a door.
+    private const int MinSharedWallLength = 2;
+
+    private enum SplitDirection
     {
-        Vertical,
-        Horizontal
+        Vertical,   // Cut left / right
+        Horizontal  // Cut bottom / top
     }
 
-    public int mainRoomSize = 30;
-    public float splitDeviation = 0.2f;
-    public int doorWidth = 2;
-    public float graphGenerationDelay = 0.5f;
-    public float floorTileSize = 1f;
+    // --- Inspector settings ---
 
+    [Header("Dungeon size")]
+    [Tooltip("Width and height of the starting rectangle before any splits.")]
+    public int mainRoomSize = 30;
+
+    [Tooltip("No room will end up narrower or shorter than this. Rooms do not have to be square.")]
+    public int minRoomSize = 8;
+
+    [Header("BSP tuning")]
+    [Tooltip("How far the split line can move away from the exact middle (0 = always center, 0.2 = ±20% of size).")]
+    public float splitDeviation = 0.2f;
+
+    [Header("Doors")]
+    [Tooltip("How wide the door opening is in grid units.")]
+    public int doorWidth = 2;
+
+    [Header("Debug & visuals")]
+    [Tooltip("When off, BSP and graph build instantly with no pauses.")]
+    public bool animateGeneration = true;
+
+    [Tooltip("Pause after each graph step (room node or door connection). Total wait ≈ (rooms + doors) × this value.")]
+    public float graphGenerationDelay = 0.5f;
+
+    [Tooltip("Pause between BSP split rounds so you can watch rooms appear. Not affected by Graph Generation Delay.")]
+    public float splitAnimationDelay = 1f;
+
+    [Tooltip("Draws nodes and edges while the graph is built.")]
     public GraphVisualizer graphVisualizer;
 
-    [SerializeField] private int splitsNumber = 4;
+    [Header("Prefabs & NavMesh")]
     [SerializeField] private NavMeshSurface navMeshSurface;
     [SerializeField] private GameObject wallPrefab;
     [SerializeField] private GameObject floorPrefab;
 
+    private float floorTileSize = 1f;
+
+    // --- Runtime data ---
+
     private List<RectInt> rooms = new List<RectInt>();
-    private List<DoorInfo> doorInfos = new List<DoorInfo>();
+    private List<DoorInfo> doors = new List<DoorInfo>();
+
+    // Fast lookup: "do rooms A and B already have a door?" Stored as (smallerId, largerId).
+    private HashSet<(int, int)> doorPairs = new HashSet<(int, int)>();
+
     private Graph dungeonGraph;
 
-    // Stores door position, orientation, and which two rooms it connects.
+    // Tracks every wall position we have used or reserved (shared walls + door gaps).
+    // Prevents spawning two wall prefabs on the same spot.
+    private HashSet<Vector3Int> usedWallSlots = new HashSet<Vector3Int>();
+
+    /// <summary>Everything we need to know about one door after it is placed.</summary>
     private class DoorInfo
     {
         public Vector2Int position;
-        public bool isVertical;
-        public int room1Index;
-        public int room2Index;
+        public bool isOnVerticalWall; // true = wall runs north-south, door opens east-west
+        public int roomA;
+        public int roomB;
     }
 
-    // Entry point: start the full generation pipeline.
+    // --- Unity lifecycle ---
+
     void Start()
     {
         StartCoroutine(GenerateDungeon());
     }
 
-    // Runs room splitting, then graph building.
+    /// <summary>Runs the full pipeline: split rooms, build graph, spawn 3D assets.</summary>
     private IEnumerator GenerateDungeon()
     {
-        yield return GenerateRooms();
+        yield return SplitRoomsWithBSP();
     }
 
-    // Phase 1: BSP room splitting. Starts with one room and splits it repeatedly.
-    public IEnumerator GenerateRooms()
+    // =========================================================================================
+    // PHASE 1 - Binary Space Partitioning (BSP)
+    // Keep cutting rooms in half until every room is too small to cut again.
+    // =========================================================================================
+
+    /// <summary>
+    /// Starts with one big room and repeatedly splits splittable rooms.
+    /// Time complexity: O(n) where n = number of final rooms (one split pass per room created).
+    /// </summary>
+    public IEnumerator SplitRoomsWithBSP()
     {
         rooms.Clear();
-        doorInfos.Clear();
+        doors.Clear();
+        doorPairs.Clear();
 
-        RectInt initialRoom = new RectInt(0, 0, mainRoomSize, mainRoomSize);
-        rooms.Add(initialRoom);
+        RectInt wholeDungeon = new RectInt(0, 0, mainRoomSize, mainRoomSize);
+        List<RectInt> currentRooms = new List<RectInt> { wholeDungeon };
 
-        for (int i = 0; i < splitsNumber; i++)
+        // Keep splitting until one full pass finds no splittable rooms.
+        bool anyRoomWasSplit = true;
+
+        while (anyRoomWasSplit)
         {
-            List<RectInt> newRooms = new List<RectInt>();
+            anyRoomWasSplit = false;
+            List<RectInt> roomsAfterThisRound = new List<RectInt>();
 
-            // Split every room in the current list into two smaller rooms.
-            foreach (RectInt room in rooms)
+            // One round: try to split every current room. Unsplittable rooms pass through unchanged.
+            foreach (RectInt room in currentRooms)
             {
-                SplitAxis axis = ChooseSplitAxis(room);
-                SplitRoom(room, axis, newRooms);
+                if (CanStillSplit(room))
+                {
+                    SplitDirection direction = PickSplitDirection(room);
+                    CutRoomInHalf(room, direction, roomsAfterThisRound);
+                    anyRoomWasSplit = true;
+                }
+                else
+                {
+                    roomsAfterThisRound.Add(room);
+                }
             }
 
-            rooms = newRooms;
-            yield return new WaitForSeconds(BspStepDelay);
+            currentRooms = roomsAfterThisRound;
+            rooms = new List<RectInt>(currentRooms);
+
+            if (animateGeneration)
+            {
+                yield return new WaitForSeconds(splitAnimationDelay);
+            }
         }
 
-        yield return BuildGraph();
+        yield return BuildGraphAndSpawn();
     }
 
-    // Picks vertical or horizontal split. Falls back if the room is too small for that direction.
-    private SplitAxis ChooseSplitAxis(RectInt room)
+    /// <summary>True if the room is big enough to split on at least one axis.</summary>
+    private bool CanStillSplit(RectInt room)
     {
-        bool splitVertically = Random.value > 0.5f;
-
-        if (splitVertically && room.width < MinRoomSizeToSplit)
-        {
-            splitVertically = false;
-        }
-        else if (!splitVertically && room.height < MinRoomSizeToSplit)
-        {
-            splitVertically = true;
-        }
-
-        if (splitVertically)
-        {
-            return SplitAxis.Vertical;
-        }
-
-        return SplitAxis.Horizontal;
+        return CanSplitVertically(room) || CanSplitHorizontally(room);
     }
 
-    // Returns a random split position near the middle of the given width or height.
-    private int CalculateSplitPoint(int size)
+    /// <summary>Need room.width >= 2 * minRoomSize so both left and right children stay big enough.</summary>
+    private bool CanSplitVertically(RectInt room)
+    {
+        return room.width >= minRoomSize * 2;
+    }
+
+    /// <summary>Need room.height >= 2 * minRoomSize so both bottom and top children stay big enough.</summary>
+    private bool CanSplitHorizontally(RectInt room)
+    {
+        return room.height >= minRoomSize * 2;
+    }
+
+    /// <summary>Picks a random split direction, or the only valid one if the room is very thin.</summary>
+    private SplitDirection PickSplitDirection(RectInt room)
+    {
+        bool canGoVertical = CanSplitVertically(room);
+        bool canGoHorizontal = CanSplitHorizontally(room);
+
+        if (canGoVertical && canGoHorizontal)
+        {
+            return Random.value > 0.5f ? SplitDirection.Vertical : SplitDirection.Horizontal;
+        }
+
+        return canGoVertical ? SplitDirection.Vertical : SplitDirection.Horizontal;
+    }
+
+    /// <summary>Picks a random split line near the middle of the given width or height.</summary>
+    private int PickRandomSplitLine(int size)
     {
         int middle = size / 2;
-        int deviation = Mathf.RoundToInt(size * splitDeviation);
-        return Random.Range(middle - deviation, middle + deviation);
+        int maxOffset = Mathf.RoundToInt(size * splitDeviation);
+        return Random.Range(middle - maxOffset, middle + maxOffset);
     }
 
-    // Cuts one room into two rectangles and adds them to the output list.
-    private void SplitRoom(RectInt room, SplitAxis axis, List<RectInt> output)
+    /// <summary>Cut one room into two smaller rectangles and add them to the output list.</summary>
+    private void CutRoomInHalf(RectInt room, SplitDirection direction, List<RectInt> output)
     {
-        if (axis == SplitAxis.Vertical)
+        if (direction == SplitDirection.Vertical)
         {
-            int splitPoint = CalculateSplitPoint(room.width);
+            int splitX = PickRandomSplitLine(room.width);
+            splitX = ClampSplitLine(splitX, room.width);
 
-            // Ensure neither child room is thinner than MinChildRoomSize.
-            if (splitPoint < MinChildRoomSize)
-            {
-                splitPoint = MinChildRoomSize;
-            }
-            else if (room.width - splitPoint < MinChildRoomSize)
-            {
-                splitPoint = room.width - MinChildRoomSize;
-            }
-
-            // Left child and right child.
-            output.Add(new RectInt(room.x, room.y, splitPoint, room.height));
-            output.Add(new RectInt(room.x + splitPoint, room.y, room.width - splitPoint, room.height));
+            RectInt leftRoom = new RectInt(room.x, room.y, splitX, room.height);
+            RectInt rightRoom = new RectInt(room.x + splitX, room.y, room.width - splitX, room.height);
+            output.Add(leftRoom);
+            output.Add(rightRoom);
         }
         else
         {
-            int splitPoint = CalculateSplitPoint(room.height);
+            int splitY = PickRandomSplitLine(room.height);
+            splitY = ClampSplitLine(splitY, room.height);
 
-            if (splitPoint < MinChildRoomSize)
-            {
-                splitPoint = MinChildRoomSize;
-            }
-            else if (room.height - splitPoint < MinChildRoomSize)
-            {
-                splitPoint = room.height - MinChildRoomSize;
-            }
-
-            // Bottom child and top child.
-            output.Add(new RectInt(room.x, room.y, room.width, splitPoint));
-            output.Add(new RectInt(room.x, room.y + splitPoint, room.width, room.height - splitPoint));
+            RectInt bottomRoom = new RectInt(room.x, room.y, room.width, splitY);
+            RectInt topRoom = new RectInt(room.x, room.y + splitY, room.width, room.height - splitY);
+            output.Add(bottomRoom);
+            output.Add(topRoom);
         }
     }
 
-    // Phase 2: Build graph nodes for rooms and doors, then spawn geometry.
-    private IEnumerator BuildGraph()
+    /// <summary>Makes sure both children after a split are at least minRoomSize wide/tall.</summary>
+    private int ClampSplitLine(int splitLine, int totalSize)
     {
-        yield return new WaitForSeconds(0.5f);
-
-        doorInfos.Clear();
-        dungeonGraph = new Graph();
-
-        // Add one graph node per room at its center.
-        for (int i = 0; i < rooms.Count; i++)
+        if (splitLine < minRoomSize)
         {
-            Vector2 roomCenter = new Vector2(
-                rooms[i].x + rooms[i].width / 2f,
-                rooms[i].y + rooms[i].height / 2f
-            );
-            dungeonGraph.AddNode(i, roomCenter);
-            yield return ShowGraphStep();
+            return minRoomSize;
         }
 
-        // Check every room pair for a shared wall and place doors where possible.
+        if (totalSize - splitLine < minRoomSize)
+        {
+            return totalSize - minRoomSize;
+        }
+
+        return splitLine;
+    }
+
+    // =========================================================================================
+    // PHASE 2 - Graph (rooms + doors as nodes, connections as edges)
+    // =========================================================================================
+
+    /// <summary>
+    /// Builds the graph, places doors, guarantees connectivity, then spawns 3D geometry.
+    /// Door detection is O(n²) where n = number of rooms (every room pair is checked).
+    /// </summary>
+    private IEnumerator BuildGraphAndSpawn()
+    {
+        doors.Clear();
+        doorPairs.Clear();
+        dungeonGraph = new Graph();
+
+        // Step 1: one node per room, placed at the room center.
         for (int i = 0; i < rooms.Count; i++)
+        {
+            Vector2 center = GetRoomCenter(rooms[i]);
+            dungeonGraph.AddNode(i, center);
+            yield return PauseForGraphVisualization();
+        }
+
+        // Step 2: place a door on every shared wall (BSP neighbors always share an edge).
+        // That keeps the dungeon connected by design - no extra fix-up step needed.
+        for (int i = 0; i < rooms.Count - 1; i++)
         {
             for (int j = i + 1; j < rooms.Count; j++)
             {
-                yield return TryPlaceDoorBetweenRooms(i, j, rooms[i], rooms[j]);
+                if (AlreadyHasDoor(i, j))
+                {
+                    continue;
+                }
+
+                if (TryFindDoorSpot(rooms[i], rooms[j], out int doorX, out int doorY, out bool isOnVerticalWall))
+                {
+                    yield return RegisterDoor(i, j, doorX, doorY, isOnVerticalWall);
+                }
             }
+        }
+
+        LogConnectivityResult();
+
+        if (!animateGeneration)
+        {
+            RefreshGraphVisualizer();
         }
 
         SpawnDungeonAssets();
     }
 
-    // Detects if two rooms share a wall and places a door on the overlap if it is large enough.
-    private IEnumerator TryPlaceDoorBetweenRooms(int roomIndex1, int roomIndex2, RectInt room1, RectInt room2)
+    private static Vector2 GetRoomCenter(RectInt room)
     {
-        // Rooms side by side: share a vertical wall and overlap on the Y axis.
-        bool shareVerticalWall = (room1.xMax == room2.xMin || room1.xMin == room2.xMax) &&
-            !(room1.yMax <= room2.yMin || room1.yMin >= room2.yMax);
+        return new Vector2(room.x + room.width / 2f, room.y + room.height / 2f);
+    }
+
+    // Runs BFS and DFS from room 0 to demonstrate connectivity checking.
+    // Doors on every shared wall already guarantee all rooms are reachable.
+    private void LogConnectivityResult()
+    {
+        HashSet<int> bfsResult = dungeonGraph.BFS(0);
+        HashSet<int> dfsResult = dungeonGraph.DFS(0);
+
+        Debug.Log($"Connectivity: BFS and DFS from room 0 reached all {rooms.Count} rooms " +
+                  $"(BFS visited {bfsResult.Count} graph nodes, DFS visited {dfsResult.Count}).");
+    }
+
+    /// <summary>Normalizes (roomA, roomB) so the smaller index is first - same pair either way.</summary>
+    private static (int, int) DoorPairKey(int roomA, int roomB)
+    {
+        return roomA < roomB ? (roomA, roomB) : (roomB, roomA);
+    }
+
+    private bool AlreadyHasDoor(int roomA, int roomB)
+    {
+        return doorPairs.Contains(DoorPairKey(roomA, roomB));
+    }
+
+    /// <summary>
+    /// Checks whether two rooms share a wall. If yes, picks a random door position anywhere along the shared section (not stuck in a corner).
+    /// Returns true/false; door position is returned through out parameters (doorX, doorY, isOnVerticalWall).
+    /// </summary>
+    private bool TryFindDoorSpot(RectInt roomA, RectInt roomB,
+        out int doorX, out int doorY, out bool isOnVerticalWall)
+    {
+        doorX = 0;
+        doorY = 0;
+        isOnVerticalWall = false;
+
+        // CASE 1: Side-by-side rooms (vertical shared wall - same X edge, overlapping Y range).
+        bool shareVerticalWall =
+            (roomA.xMax == roomB.xMin || roomA.xMin == roomB.xMax) &&
+            !(roomA.yMax <= roomB.yMin || roomA.yMin >= roomB.yMax);
 
         if (shareVerticalWall)
         {
-            int yStart = Mathf.Max(room1.yMin, room2.yMin);
-            int yEnd = Mathf.Min(room1.yMax, room2.yMax);
+            // Only the overlapping Y section counts - rooms may not align perfectly top/bottom.
+            int overlapStart = Mathf.Max(roomA.yMin, roomB.yMin);
+            int overlapEnd = Mathf.Min(roomA.yMax, roomB.yMax);
 
-            if (yEnd - yStart > MinDoorOverlap)
+            if (overlapEnd - overlapStart > MinSharedWallLength &&
+                PickRandomSpotOnWall(overlapStart, overlapEnd, out doorY))
             {
-                int doorY = Random.Range(yStart + 1, yEnd - 1);
-
-                int doorX;
-                if (room1.xMax == room2.xMin)
-                {
-                    doorX = room1.xMax;
-                }
-                else
-                {
-                    doorX = room1.xMin;
-                }
-
-                yield return AddDoorToGraph(roomIndex1, roomIndex2, doorX, doorY, true);
+                doorX = roomA.xMax == roomB.xMin ? roomA.xMax : roomA.xMin;
+                isOnVerticalWall = true;
+                return true;
             }
 
-            yield break;
+            return false;
         }
 
-        // Rooms stacked: share a horizontal wall and overlap on the X axis.
-        bool shareHorizontalWall = (room1.yMax == room2.yMin || room1.yMin == room2.yMax) &&
-            !(room1.xMax <= room2.xMin || room1.xMin >= room2.xMax);
+        // CASE 2: Stacked rooms (horizontal shared wall - same Y edge, overlapping X range).
+        bool shareHorizontalWall =
+            (roomA.yMax == roomB.yMin || roomA.yMin == roomB.yMax) &&
+            !(roomA.xMax <= roomB.xMin || roomA.xMin >= roomB.xMax);
 
         if (shareHorizontalWall)
         {
-            int xStart = Mathf.Max(room1.xMin, room2.xMin);
-            int xEnd = Mathf.Min(room1.xMax, room2.xMax);
+            // Only the overlapping X section counts - rooms may not align perfectly left/right.
+            int overlapStart = Mathf.Max(roomA.xMin, roomB.xMin);
+            int overlapEnd = Mathf.Min(roomA.xMax, roomB.xMax);
 
-            if (xEnd - xStart > MinDoorOverlap)
+            if (overlapEnd - overlapStart > MinSharedWallLength &&
+                PickRandomSpotOnWall(overlapStart, overlapEnd, out doorX))
             {
-                int doorX = Random.Range(xStart + 1, xEnd - 1);
-
-                int doorY;
-                if (room1.yMax == room2.yMin)
-                {
-                    doorY = room1.yMax;
-                }
-                else
-                {
-                    doorY = room1.yMin;
-                }
-
-                yield return AddDoorToGraph(roomIndex1, roomIndex2, doorX, doorY, false);
+                doorY = roomA.yMax == roomB.yMin ? roomA.yMax : roomA.yMin;
+                isOnVerticalWall = false;
+                return true;
             }
         }
+
+        return false;
     }
 
-    // Adds a door node to the graph and connects it to both rooms.
-    private IEnumerator AddDoorToGraph(int roomIndex1, int roomIndex2, int doorX, int doorY, bool isVertical)
+    /// <summary>
+    /// Picks a random grid position along the shared wall section.
+    /// Leaves doorWidth/2 padding on each end so the door is not stuck in a corner.
+    /// </summary>
+    private bool PickRandomSpotOnWall(int wallStart, int wallEnd, out int position)
     {
-        int doorNodeId = rooms.Count + doorInfos.Count;
+        // Valid center positions: far enough from both ends for the full door width.
+        int minPos = wallStart + doorWidth / 2;
+        int maxPos = wallEnd - doorWidth / 2;
+
+        if (minPos > maxPos)
+        {
+            // Wall barely fits - place in the middle as a fallback.
+            position = (wallStart + wallEnd) / 2;
+            return wallEnd - wallStart > MinSharedWallLength;
+        }
+
+        position = Random.Range(minPos, maxPos + 1);
+        return true;
+    }
+
+    /// <summary>
+    /// Adds a door node to the graph and links it to both rooms: roomA - door - roomB.
+    /// Room IDs are 0..rooms.Count-1. Door IDs start at rooms.Count so they never clash.
+    /// </summary>
+    private IEnumerator RegisterDoor(int roomA, int roomB, int doorX, int doorY, bool isOnVerticalWall)
+    {
+        int doorNodeId = rooms.Count + doors.Count;
         Vector2 doorPosition = new Vector2(doorX, doorY);
 
         dungeonGraph.AddNode(doorNodeId, doorPosition);
-        yield return ShowGraphStep();
+        dungeonGraph.AddEdge(roomA, doorNodeId);
+        dungeonGraph.AddEdge(roomB, doorNodeId);
 
-        dungeonGraph.AddEdge(roomIndex1, doorNodeId);
-        dungeonGraph.AddEdge(roomIndex2, doorNodeId);
-        yield return ShowGraphStep();
-
-        doorInfos.Add(new DoorInfo
+        doors.Add(new DoorInfo
         {
             position = new Vector2Int(doorX, doorY),
-            isVertical = isVertical,
-            room1Index = roomIndex1,
-            room2Index = roomIndex2
+            isOnVerticalWall = isOnVerticalWall,
+            roomA = roomA,
+            roomB = roomB
         });
+        doorPairs.Add(DoorPairKey(roomA, roomB));
+
+        // One pause per door (node + both edges are added together, then we wait).
+        yield return PauseForGraphVisualization();
     }
 
-    // Updates the graph visualizer and pauses so each step can be seen.
-    private IEnumerator ShowGraphStep()
+    private void RefreshGraphVisualizer()
     {
         if (graphVisualizer != null)
         {
             graphVisualizer.SetGraph(dungeonGraph);
         }
+    }
 
+    private IEnumerator PauseForGraphVisualization()
+    {
+        if (!animateGeneration)
+        {
+            yield break;
+        }
+
+        RefreshGraphVisualizer();
         yield return new WaitForSeconds(graphGenerationDelay);
     }
 
-    // Debug drawing: red room outlines and blue door lines every frame.
+    // =========================================================================================
+    // Debug drawing (Game view / Scene view lines while playing)
+    // =========================================================================================
+
     void Update()
     {
+        // Red outlines = room boundaries.
         foreach (RectInt room in rooms)
         {
             AlgorithmsUtils.DebugRectInt(room, new Color(255, 0, 0));
         }
 
-        foreach (DoorInfo doorInfo in doorInfos)
+        // Blue lines = door openings.
+        foreach (DoorInfo door in doors)
         {
-            Vector2Int door = doorInfo.position;
+            DrawDoorDebugLine(door);
+        }
+    }
 
-            if (doorInfo.isVertical)
+    private void DrawDoorDebugLine(DoorInfo door)
+    {
+        Vector2Int pos = door.position;
+
+        if (door.isOnVerticalWall)
+        {
+            Debug.DrawLine(
+                new Vector3(pos.x, 0, pos.y - doorWidth / 2),
+                new Vector3(pos.x, 0, pos.y + doorWidth / 2),
+                Color.blue,
+                0.1f
+            );
+        }
+        else
+        {
+            Debug.DrawLine(
+                new Vector3(pos.x - doorWidth / 2, 0, pos.y),
+                new Vector3(pos.x + doorWidth / 2, 0, pos.y),
+                Color.blue,
+                0.1f
+            );
+        }
+    }
+
+    // =========================================================================================
+    // PHASE 3 - Spawn 3D floor and walls, then bake NavMesh for the hero
+    // =========================================================================================
+
+    /// <summary>
+    /// Spawns floor and walls, then bakes NavMesh.
+    /// ReserveDoorSlots runs first so door gaps are never filled with walls.
+    /// Time complexity: O(n) where n = number of rooms (each room has bounded edge length).
+    /// </summary>
+    private void SpawnDungeonAssets()
+    {
+        usedWallSlots.Clear();
+        ReserveDoorSlots();
+
+        GameObject wallsParent = new GameObject("Walls");
+        GameObject floorsParent = new GameObject("Floors");
+
+        SpawnEntireFloor(floorsParent.transform);
+
+        const float wallSegmentSize = 0.5f;
+        const float wallHeightOffset = 0.5f;
+
+        foreach (RectInt room in rooms)
+        {
+            SpawnWallsAroundRoom(room, wallsParent.transform, wallSegmentSize, wallHeightOffset);
+        }
+
+        BakeNavMesh();
+    }
+
+    /// <summary>One continuous floor grid covering the original dungeon area (not per-room).</summary>
+    private void SpawnEntireFloor(Transform parent)
+    {
+        float tileCenterOffset = floorTileSize / 2f;
+
+        for (float x = 0; x < mainRoomSize; x += floorTileSize)
+        {
+            for (float z = 0; z < mainRoomSize; z += floorTileSize)
             {
-                Debug.DrawLine(
-                    new Vector3(door.x, 0, door.y - doorWidth / 2),
-                    new Vector3(door.x, 0, door.y + doorWidth / 2),
-                    Color.blue,
-                    0.1f
-                );
-            }
-            else
-            {
-                Debug.DrawLine(
-                    new Vector3(door.x - doorWidth / 2, 0, door.y),
-                    new Vector3(door.x + doorWidth / 2, 0, door.y),
-                    Color.blue,
-                    0.1f
-                );
+                Vector3 tilePosition = new Vector3(x + tileCenterOffset, 0, z + tileCenterOffset);
+                GameObject floor = Instantiate(floorPrefab, tilePosition, Quaternion.Euler(90, 0, 0), parent);
+                floor.name = "Floor";
             }
         }
     }
 
-    // Rebuilds the NavMesh so the player can walk on spawned floors.
+    /// <summary>
+    /// Pre-marks every grid slot inside a door opening in usedWallSlots.
+    /// Later, TrySpawnWall sees those slots as taken and skips them
+    /// Time complexity: O(n) where n = number of doors (fixed slots per door).
+    /// </summary>
+    private void ReserveDoorSlots()
+    {
+        const float wallHeightOffset = 0.5f;
+        const float wallSegmentSize = 0.5f;
+        float halfDoor = doorWidth / 2f;
+
+        foreach (DoorInfo door in doors)
+        {
+            if (door.isOnVerticalWall)
+            {
+                // Walk along the door opening on the Z axis
+                for (float z = door.position.y - halfDoor; z <= door.position.y + halfDoor; z += wallSegmentSize)
+                {
+                    Vector3 position = new Vector3(door.position.x, wallHeightOffset, z);
+                    // Strictly inside the opening (not on the exact edge)
+                    if (Mathf.Abs(position.z - door.position.y) < halfDoor)
+                    {
+                        usedWallSlots.Add(ToWallSlot(position));
+                    }
+                }
+            }
+            else
+            {
+                // Walk along the door opening on the X axis.
+                for (float x = door.position.x - halfDoor; x <= door.position.x + halfDoor; x += wallSegmentSize)
+                {
+                    Vector3 position = new Vector3(x, wallHeightOffset, door.position.y);
+                    if (Mathf.Abs(position.x - door.position.x) < halfDoor)
+                    {
+                        usedWallSlots.Add(ToWallSlot(position));
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Places wall segments every segmentSize units along all four edges of one room.
+    /// Adjacent rooms share edges - usedWallSlots prevents duplicate walls on shared borders.
+    /// </summary>
+    private void SpawnWallsAroundRoom(RectInt room, Transform parent, float segmentSize, float yOffset)
+    {
+        float left = room.x;
+        float right = room.x + room.width;
+        float bottom = room.y;
+        float top = room.y + room.height;
+
+        for (float x = left; x < right; x += segmentSize)
+        {
+            TrySpawnWall(new Vector3(x, yOffset, top), parent);
+            TrySpawnWall(new Vector3(x, yOffset, bottom), parent);
+        }
+
+        for (float z = bottom; z < top; z += segmentSize)
+        {
+            TrySpawnWall(new Vector3(left, yOffset, z), parent);
+            TrySpawnWall(new Vector3(right, yOffset, z), parent);
+        }
+    }
+
+    /// <summary>
+    /// Converts a world position to an integer grid slot (×2 because wall segments are 0.5 units).
+    /// Two positions that land on the same slot are treated as the same wall location.
+    /// </summary>
+    private static Vector3Int ToWallSlot(Vector3 position)
+    {
+        return new Vector3Int(
+            Mathf.RoundToInt(position.x * 2f),
+            Mathf.RoundToInt(position.y * 2f),
+            Mathf.RoundToInt(position.z * 2f)
+        );
+    }
+
+    /// <summary>
+    /// Spawns one wall prefab at this position unless the slot is already taken.
+    /// Slot may be taken by a previous room's shared wall or by ReserveDoorSlots (door gap).
+    /// </summary>
+    private void TrySpawnWall(Vector3 position, Transform parent)
+    {
+        Vector3Int slot = ToWallSlot(position);
+
+        if (usedWallSlots.Contains(slot))
+        {
+            return; // shared wall or door opening - do not spawn
+        }
+
+        usedWallSlots.Add(slot);
+        GameObject wall = Instantiate(wallPrefab, position, Quaternion.identity, parent);
+        wall.name = "Wall";
+    }
+
+    /// <summary>Tells Unity's NavMesh system to recalculate walkable paths on the new floor.</summary>
     private void BakeNavMesh()
     {
         if (navMeshSurface != null)
@@ -317,112 +621,6 @@ public class DungeonGenerator : MonoBehaviour
             navMeshSurface.BuildNavMesh();
         }
     }
-
-    // Phase 3: Spawn floor and wall prefabs for every room, then bake NavMesh.
-    private void SpawnDungeonAssets()
-    {
-        GameObject wallsParent = new GameObject("Walls");
-        GameObject floorsParent = new GameObject("Floors");
-        wallsParent.transform.SetParent(null);
-        floorsParent.transform.SetParent(null);
-
-        float wallWidth = 0.5f;
-        float wallYOffset = 0.5f;
-
-        foreach (RectInt room in rooms)
-        {
-            SpawnRoomFloors(room, floorsParent.transform);
-            SpawnRoomWalls(room, wallsParent.transform, wallWidth, wallYOffset);
-        }
-
-        BakeNavMesh();
-    }
-
-    // Fills a room with floor tiles on a grid.
-    private void SpawnRoomFloors(RectInt room, Transform parent)
-    {
-        float left = room.x;
-        float right = room.x + room.width;
-        float bottom = room.y;
-        float top = room.y + room.height;
-        float offset = floorTileSize / 2f;
-
-        for (float x = left; x < right; x += floorTileSize)
-        {
-            for (float z = bottom; z < top; z += floorTileSize)
-            {
-                SpawnFloor(new Vector3(x + offset, 0, z + offset), parent);
-            }
-        }
-    }
-
-    // Places wall segments along all four edges of a room.
-    private void SpawnRoomWalls(RectInt room, Transform parent, float wallWidth, float wallYOffset)
-    {
-        float left = room.x;
-        float right = room.x + room.width;
-        float bottom = room.y;
-        float top = room.y + room.height;
-
-        for (float x = left; x < right; x += wallWidth)
-        {
-            SpawnWall(new Vector3(x, wallYOffset, top), parent);
-        }
-
-        for (float x = left; x < right; x += wallWidth)
-        {
-            SpawnWall(new Vector3(x, wallYOffset, bottom), parent);
-        }
-
-        for (float z = bottom; z < top; z += wallWidth)
-        {
-            SpawnWall(new Vector3(left, wallYOffset, z), parent);
-        }
-
-        for (float z = bottom; z < top; z += wallWidth)
-        {
-            SpawnWall(new Vector3(right, wallYOffset, z), parent);
-        }
-    }
-
-    // Spawns a wall unless this position overlaps a door opening.
-    private void SpawnWall(Vector3 position, Transform parent)
-    {
-        bool isDoorPosition = false;
-
-        foreach (DoorInfo doorInfo in doorInfos)
-        {
-            if (doorInfo.isVertical)
-            {
-                if (Mathf.Abs(position.x - doorInfo.position.x) < 0.1f &&
-                    Mathf.Abs(position.z - doorInfo.position.y) < doorWidth / 2f)
-                {
-                    isDoorPosition = true;
-                    break;
-                }
-            }
-            else
-            {
-                if (Mathf.Abs(position.z - doorInfo.position.y) < 0.1f &&
-                    Mathf.Abs(position.x - doorInfo.position.x) < doorWidth / 2f)
-                {
-                    isDoorPosition = true;
-                    break;
-                }
-            }
-        }
-
-        if (!isDoorPosition)
-        {
-            GameObject wall = Instantiate(wallPrefab, position, Quaternion.identity, parent);
-            wall.name = "Wall";
-        }
-    }
-
-    // Spawns a single floor tile, rotated flat on the ground.
-    private void SpawnFloor(Vector3 position, Transform parent)
-    {
-        GameObject floor = Instantiate(floorPrefab, position, Quaternion.Euler(90, 0, 0), parent);
-        floor.name = "Floor";
-    }
 }
+
+

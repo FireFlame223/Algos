@@ -1,27 +1,27 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-// Represents a graph data structure where nodes are connected by edges.
-// Each node has a position in 2D space and can be connected to other nodes.
+/// <summary>
+/// A simple graph: nodes (points) connected by edges (links).
+/// Used to represent rooms and doors in the dungeon.
+///
+/// Graph shape:  RoomA --- Door --- RoomB  (door sits between two rooms)
+/// </summary>
 public class Graph
 {
+    /// <summary>
+    /// One point in the graph. Stores a world position and a list of connected node IDs.
+    /// </summary>
     private class Node
     {
         public Vector2 Position;
         public List<int> Neighbors = new List<int>();
     }
 
-    // One dictionary holds both position and neighbors for each node.
-    private Dictionary<int, Node> nodes;
+    // Lookup table: node ID -> node data.
+    private Dictionary<int, Node> nodes = new Dictionary<int, Node>();
 
-    // Creates an empty graph.
-    public Graph()
-    {
-        nodes = new Dictionary<int, Node>();
-    }
-
-    // Adds a new node to the graph with the specified ID and position.
-    // If a node with this ID already exists, it will not be modified.
+    /// <summary>Adds a node if that ID is not used yet.</summary>
     public void AddNode(int nodeId, Vector2 position)
     {
         if (!nodes.ContainsKey(nodeId))
@@ -30,8 +30,7 @@ public class Graph
         }
     }
 
-    // Creates a connection between two nodes that already exist.
-    // If the connection already exists, nothing changes.
+    /// <summary>Connects two existing nodes (works both ways).</summary>
     public void AddEdge(int node1, int node2)
     {
         if (!nodes.ContainsKey(node1) || !nodes.ContainsKey(node2))
@@ -50,7 +49,7 @@ public class Graph
         }
     }
 
-    // Returns the position of a node, or Vector2.zero if the ID does not exist.
+    /// <summary>Returns the position of a node, or (0,0) if the ID does not exist.</summary>
     public Vector2 GetNodePosition(int nodeId)
     {
         if (nodes.ContainsKey(nodeId))
@@ -61,7 +60,7 @@ public class Graph
         return Vector2.zero;
     }
 
-    // Returns a copy so outside code cannot change the graph's internal lists.
+    /// <summary>Returns a copy of all neighbors for a node.</summary>
     public List<int> GetNeighbors(int nodeId)
     {
         if (nodes.ContainsKey(nodeId))
@@ -72,15 +71,93 @@ public class Graph
         return new List<int>();
     }
 
-    // Returns how many nodes are in the graph.
+    /// <summary>How many nodes are in the graph.</summary>
     public int GetNodeCount()
     {
         return nodes.Count;
     }
 
-    // Returns every node ID in the graph.
+    /// <summary>All node IDs in the graph.</summary>
     public IEnumerable<int> GetAllNodes()
     {
         return nodes.Keys;
+    }
+
+    /// <summary>
+    /// Breadth-First Search (BFS)
+    /// Visits nodes in "rings": start node first, then its neighbors, then their neighbors and so on.
+    /// Returns every node ID that can be reached from the start.
+    /// Time complexity: O(n) where n = number of graph nodes (rooms and doors), because each node is visited at most once.
+    /// </summary>
+    public HashSet<int> BFS(int startNodeId)
+    {
+        HashSet<int> visited = new HashSet<int>();
+
+        // If the start node isn't in the graph, return empty instead of crashing.
+        if (!nodes.ContainsKey(startNodeId))
+        {
+            return visited;
+        }
+
+        Queue<int> toVisit = new Queue<int>();
+        toVisit.Enqueue(startNodeId);
+        visited.Add(startNodeId);
+
+        while (toVisit.Count > 0)
+        {
+            int current = toVisit.Dequeue();
+
+            // Visit every neighbor of the current node. HashSet gives O(1) "already visited?" checks.
+            foreach (int neighbor in nodes[current].Neighbors)
+            {
+                if (visited.Add(neighbor))
+                {
+                    toVisit.Enqueue(neighbor);
+                }
+            }
+        }
+
+        return visited;
+    }
+
+    /// <summary>
+    /// Depth-First Search (DFS)
+    /// Goes deep down one path first, then backtracks when there is nowhere left to go.
+    /// Returns every node ID that can be reached from the start.
+    /// Time complexity: O(n) where n = number of graph nodes (rooms and doors), because each node is visited at most once.
+    /// </summary>
+    public HashSet<int> DFS(int startNodeId)
+    {
+        HashSet<int> visited = new HashSet<int>();
+
+        // If the start node isn't in the graph, return empty instead of crashing.
+        if (!nodes.ContainsKey(startNodeId))
+        {
+            return visited;
+        }
+
+        Stack<int> toVisit = new Stack<int>();
+        toVisit.Push(startNodeId);
+
+        while (toVisit.Count > 0)
+        {
+            int current = toVisit.Pop();
+
+            if (!visited.Add(current))
+            {
+                continue; // already handled this node
+            }
+
+            // Push unvisited neighbors - the last pushed will be explored first (go deep before backtracking).
+            foreach (int neighbor in nodes[current].Neighbors)
+            {
+                if (!visited.Contains(neighbor))
+                {
+                    toVisit.Push(neighbor);
+                }
+            }
+        }
+
+        return visited;
     }
 }
