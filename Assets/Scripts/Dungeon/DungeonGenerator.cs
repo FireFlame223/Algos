@@ -16,6 +16,9 @@ public class DungeonGenerator : MonoBehaviour
     // Shared wall must be at least this long before we allow a door.
     private const int MinSharedWallLength = 2;
 
+    // Door opening is 2 grid units wide; door.position is the center.
+    private const int DoorHalfWidth = 1;
+
     private enum SplitDirection
     {
         Vertical,   // Cut left / right
@@ -30,10 +33,6 @@ public class DungeonGenerator : MonoBehaviour
 
     [Tooltip("No room will end up narrower or shorter than this. Rooms do not have to be square.")]
     public int minRoomSize = 8;
-
-    [Header("Doors")]
-    [Tooltip("How wide the door opening is in grid units.")]
-    public int doorWidth = 2;
 
     [Header("Debug & visuals")]
     [Tooltip("Pause between BSP split rounds so you can watch rooms appear.")]
@@ -388,12 +387,12 @@ public class DungeonGenerator : MonoBehaviour
 
     /// <summary>
     /// Picks a random grid position along the shared wall section.
-    /// Leaves doorWidth/2 padding on each end so the door is not stuck in a corner.
+    /// Leaves DoorHalfWidth padding on each end so the door is not stuck in a corner.
     /// </summary>
     private bool PickRandomSpotOnWall(int wallStart, int wallEnd, out int position)
     {
-        int minPos = wallStart + doorWidth / 2;
-        int maxPos = wallEnd - doorWidth / 2;
+        int minPos = wallStart + DoorHalfWidth;
+        int maxPos = wallEnd - DoorHalfWidth;
 
         if (minPos > maxPos)
         {
@@ -468,8 +467,8 @@ public class DungeonGenerator : MonoBehaviour
         if (door.isOnVerticalWall)
         {
             Debug.DrawLine(
-                new Vector3(pos.x, 0, pos.y - doorWidth / 2),
-                new Vector3(pos.x, 0, pos.y + doorWidth / 2),
+                new Vector3(pos.x, 0, pos.y - DoorHalfWidth),
+                new Vector3(pos.x, 0, pos.y + DoorHalfWidth),
                 Color.blue,
                 0.1f
             );
@@ -477,8 +476,8 @@ public class DungeonGenerator : MonoBehaviour
         else
         {
             Debug.DrawLine(
-                new Vector3(pos.x - doorWidth / 2, 0, pos.y),
-                new Vector3(pos.x + doorWidth / 2, 0, pos.y),
+                new Vector3(pos.x - DoorHalfWidth, 0, pos.y),
+                new Vector3(pos.x + DoorHalfWidth, 0, pos.y),
                 Color.blue,
                 0.1f
             );
@@ -540,18 +539,17 @@ public class DungeonGenerator : MonoBehaviour
     {
         const float wallHeightOffset = 0.5f;
         const float wallSegmentSize = 0.5f;
-        float halfDoor = doorWidth / 2f;
 
         foreach (DoorInfo door in doors)
         {
             if (door.isOnVerticalWall)
             {
                 // Walk along the door opening on the Z axis
-                for (float z = door.position.y - halfDoor; z <= door.position.y + halfDoor; z += wallSegmentSize)
+                for (float z = door.position.y - DoorHalfWidth; z <= door.position.y + DoorHalfWidth; z += wallSegmentSize)
                 {
                     Vector3 position = new Vector3(door.position.x, wallHeightOffset, z);
                     // Strictly inside the opening (not on the exact edge)
-                    if (Mathf.Abs(position.z - door.position.y) < halfDoor)
+                    if (Mathf.Abs(position.z - door.position.y) < DoorHalfWidth)
                     {
                         usedWallSlots.Add(ToWallSlot(position));
                     }
@@ -560,10 +558,10 @@ public class DungeonGenerator : MonoBehaviour
             else
             {
                 // Walk along the door opening on the X axis.
-                for (float x = door.position.x - halfDoor; x <= door.position.x + halfDoor; x += wallSegmentSize)
+                for (float x = door.position.x - DoorHalfWidth; x <= door.position.x + DoorHalfWidth; x += wallSegmentSize)
                 {
                     Vector3 position = new Vector3(x, wallHeightOffset, door.position.y);
-                    if (Mathf.Abs(position.x - door.position.x) < halfDoor)
+                    if (Mathf.Abs(position.x - door.position.x) < DoorHalfWidth)
                     {
                         usedWallSlots.Add(ToWallSlot(position));
                     }
