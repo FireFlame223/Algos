@@ -268,7 +268,7 @@ public class DungeonGenerator : MonoBehaviour
             }
         }
 
-        LogConnectivityResult();
+        VerifyAllRoomsReachable();
 
         if (!animateGeneration)
         {
@@ -283,15 +283,31 @@ public class DungeonGenerator : MonoBehaviour
         return new Vector2(room.x + room.width / 2f, room.y + room.height / 2f);
     }
 
-    // Runs BFS and DFS from room 0 to demonstrate connectivity checking.
-    // Doors on every shared wall already guarantee all rooms are reachable.
-    private void LogConnectivityResult()
+    /// <summary>
+    /// Uses BFS and DFS from room 0 to confirm every room was visited.
+    /// Doors on shared walls are meant to keep the dungeon connected; this proves it.
+    /// </summary>
+    private void VerifyAllRoomsReachable()
     {
-        HashSet<int> bfsResult = dungeonGraph.BFS(0);
-        HashSet<int> dfsResult = dungeonGraph.DFS(0);
+        HashSet<int> bfsVisited = dungeonGraph.BFS(0);
+        HashSet<int> dfsVisited = dungeonGraph.DFS(0);
 
-        Debug.Log($"Connectivity: BFS and DFS from room 0 reached all {rooms.Count} rooms " +
-                  $"(BFS visited {bfsResult.Count} graph nodes, DFS visited {dfsResult.Count}).");
+        for (int i = 0; i < rooms.Count; i++)
+        {
+            if (!bfsVisited.Contains(i))
+            {
+                Debug.LogError($"Connectivity check failed: BFS from room 0 did not reach room {i}.");
+                return;
+            }
+
+            if (!dfsVisited.Contains(i))
+            {
+                Debug.LogError($"Connectivity check failed: DFS from room 0 did not reach room {i}.");
+                return;
+            }
+        }
+
+        Debug.Log($"Connectivity verified: all {rooms.Count} rooms are reachable from room 0 (BFS and DFS).");
     }
 
     /// <summary>Normalizes (roomA, roomB) so the smaller index is first - same pair either way.</summary>
