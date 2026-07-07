@@ -31,10 +31,6 @@ public class DungeonGenerator : MonoBehaviour
     [Tooltip("No room will end up narrower or shorter than this. Rooms do not have to be square.")]
     public int minRoomSize = 8;
 
-    [Header("BSP tuning")]
-    [Tooltip("How far the split line can move away from the exact middle (0 = always center, 0.2 = ±20% of size).")]
-    public float splitDeviation = 0.2f;
-
     [Header("Doors")]
     [Tooltip("How wide the door opening is in grid units.")]
     public int doorWidth = 2;
@@ -180,12 +176,15 @@ public class DungeonGenerator : MonoBehaviour
         return canGoVertical ? SplitDirection.Vertical : SplitDirection.Horizontal;
     }
 
-    /// <summary>Picks a random split line near the middle of the given width or height.</summary>
+    /// <summary>
+    /// Picks a random split line anywhere along the room axis, as long as both sides stay >= minRoomSize.
+    /// Only the edges (too-small children) are excluded - not a narrow band around the center.
+    /// </summary>
     private int PickRandomSplitLine(int size)
     {
-        int middle = size / 2;
-        int maxOffset = Mathf.RoundToInt(size * splitDeviation);
-        return Random.Range(middle - maxOffset, middle + maxOffset);
+        int minSplit = minRoomSize;
+        int maxSplit = size - minRoomSize;
+        return Random.Range(minSplit, maxSplit + 1);
     }
 
     /// <summary>Cut one room into two smaller rectangles and add them to the output list.</summary>
@@ -368,13 +367,11 @@ public class DungeonGenerator : MonoBehaviour
     /// </summary>
     private bool PickRandomSpotOnWall(int wallStart, int wallEnd, out int position)
     {
-        // Valid center positions: far enough from both ends for the full door width.
         int minPos = wallStart + doorWidth / 2;
         int maxPos = wallEnd - doorWidth / 2;
 
         if (minPos > maxPos)
         {
-            // Wall barely fits - place in the middle as a fallback.
             position = (wallStart + wallEnd) / 2;
             return wallEnd - wallStart > MinSharedWallLength;
         }
