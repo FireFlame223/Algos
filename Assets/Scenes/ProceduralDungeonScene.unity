@@ -332,11 +332,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   mainRoomSize: 64
   minRoomSize: 4
-  splitDeviation: 0.5
   doorWidth: 2
-  animateGeneration: 0
+  animateRoomSplitting: 1
+  animateNodeCreation: 1
+  splitAnimationDelay: 0.1
   graphGenerationDelay: 0.1
-  splitAnimationDelay: 0.5
   graphVisualizer: {fileID: 1456857407}
   navMeshSurface: {fileID: 1977782037}
   wallPrefab: {fileID: 8186914927062543598, guid: 8d780f985f49849479d2d2980d821055, type: 3}

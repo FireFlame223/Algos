@@ -36,14 +36,17 @@ public class DungeonGenerator : MonoBehaviour
     public int doorWidth = 2;
 
     [Header("Debug & visuals")]
-    [Tooltip("When off, BSP and graph build instantly with no pauses.")]
-    public bool animateGeneration = true;
+    [Tooltip("Pause between BSP split rounds so you can watch rooms appear.")]
+    public bool animateRoomSplitting = true;
 
-    [Tooltip("Pause after each graph step (room node or door connection). Total wait ≈ (rooms + doors) × this value.")]
-    public float graphGenerationDelay = 0.5f;
+    [Tooltip("Pause after each room or door node is added to the graph (yellow spheres / cyan edges).")]
+    public bool animateNodeCreation = true;
 
-    [Tooltip("Pause between BSP split rounds so you can watch rooms appear. Not affected by Graph Generation Delay.")]
+    [Tooltip("Pause between BSP split rounds. Not affected by Graph Generation Delay.")]
     public float splitAnimationDelay = 1f;
+
+    [Tooltip("Pause after each graph node step.")]
+    public float graphGenerationDelay = 0.5f;
 
     [Tooltip("Draws nodes and edges while the graph is built.")]
     public GraphVisualizer graphVisualizer;
@@ -135,7 +138,7 @@ public class DungeonGenerator : MonoBehaviour
             currentRooms = roomsAfterThisRound;
             rooms = new List<RectInt>(currentRooms);
 
-            if (animateGeneration)
+            if (animateRoomSplitting)
             {
                 yield return new WaitForSeconds(splitAnimationDelay);
             }
@@ -247,7 +250,11 @@ public class DungeonGenerator : MonoBehaviour
         {
             Vector2 center = GetRoomCenter(rooms[i]);
             dungeonGraph.AddNode(i, center);
-            yield return PauseForGraphVisualization();
+
+            if (animateNodeCreation)
+            {
+                yield return PauseForNodeVisualization();
+            }
         }
 
         // Step 2: place a door on every shared wall (BSP neighbors always share an edge).
@@ -263,17 +270,19 @@ public class DungeonGenerator : MonoBehaviour
 
                 if (TryFindDoorSpot(rooms[i], rooms[j], out int doorX, out int doorY, out bool isOnVerticalWall))
                 {
-                    yield return RegisterDoor(i, j, doorX, doorY, isOnVerticalWall);
+                    RegisterDoor(i, j, doorX, doorY, isOnVerticalWall);
+
+                    if (animateNodeCreation)
+                    {
+                        yield return PauseForNodeVisualization();
+                    }
                 }
             }
         }
 
         VerifyAllRoomsReachable();
 
-        if (!animateGeneration)
-        {
-            RefreshGraphVisualizer();
-        }
+        RefreshGraphVisualizer();
 
         SpawnDungeonAssets();
     }
@@ -400,7 +409,7 @@ public class DungeonGenerator : MonoBehaviour
     /// Adds a door node to the graph and links it to both rooms: roomA - door - roomB.
     /// Room IDs are 0..rooms.Count-1. Door IDs start at rooms.Count so they never clash.
     /// </summary>
-    private IEnumerator RegisterDoor(int roomA, int roomB, int doorX, int doorY, bool isOnVerticalWall)
+      private void RegisterDoor(int roomA, int roomB, int doorX, int doorY, bool isOnVerticalWall)
     {
         int doorNodeId = rooms.Count + doors.Count;
         Vector2 doorPosition = new Vector2(doorX, doorY);
@@ -417,9 +426,6 @@ public class DungeonGenerator : MonoBehaviour
             roomB = roomB
         });
         doorPairs.Add(DoorPairKey(roomA, roomB));
-
-        // One pause per door (node + both edges are added together, then we wait).
-        yield return PauseForGraphVisualization();
     }
 
     private void RefreshGraphVisualizer()
@@ -430,13 +436,8 @@ public class DungeonGenerator : MonoBehaviour
         }
     }
 
-    private IEnumerator PauseForGraphVisualization()
+    private IEnumerator PauseForNodeVisualization()
     {
-        if (!animateGeneration)
-        {
-            yield break;
-        }
-
         RefreshGraphVisualizer();
         yield return new WaitForSeconds(graphGenerationDelay);
     }
